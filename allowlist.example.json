@@ -1,0 +1,6 @@
+{
+  "devices": [
+    { "mac": "AA:BB:CC:11:22:33", "name": "My Laptop" },
+    { "mac": "44:55:66:77:88:99", "name": "Router" }
+  ]
+}

@@ -1,0 +1,57 @@
+# -------------------------
+# Python
+# -------------------------
+
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# -------------------------
+# Tooling / Lint / Test
+# -------------------------
+
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# -------------------------
+# Local runtime files
+# -------------------------
+
+devices_db.json
+*.log
+
+# -------------------------
+# IDE / Editor
+# -------------------------
+
+.vscode/
+.idea/
+
+# -------------------------
+# OS Files
+# -------------------------
+
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# -------------------------
+# Temporary / misc
+# -------------------------
+
+*.tmp
+*.bak
