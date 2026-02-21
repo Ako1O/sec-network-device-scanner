@@ -47,7 +47,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
         mac_norm = normalize_mac(d.mac)
         manufacturer = oui.manufacturer(mac_norm) or "(unknown)"
 
-        # Allowlist / DB detection
+        # Allowlist + DB info
         allowed = allow.get(mac_norm)
         in_allow = allowed is not None
 
@@ -59,8 +59,17 @@ def cmd_scan(args: argparse.Namespace) -> int:
 
         # Decide status
         if args.learn:
+            # Learning baseline: show all as Known, but still writes into DB
             status = "Known"
+        elif args.strict:
+            # Strict mode: allowlist is the source of truth
+            if in_allow:
+                status = "Allowed"
+            else:
+                status = "⚠ Unknown"
+                unknown_count += 1
         else:
+            # Normal mode: DB-based "New" detection + allowlist labeling
             if in_allow:
                 status = "Allowed"
             elif not args.no_db and is_new:
@@ -105,12 +114,16 @@ def cmd_scan(args: argparse.Namespace) -> int:
         )
         console.print(f"\n[dim]Saved:[/dim] {out_path}")
 
-    # Exit codes (automation friendly)
-    # 1 = at least one NEW device detected (best default for monitoring)
-    # 0 = no new devices
-    if new_count > 0 and not args.learn:
-        return 1
-    return 0
+    # Exit codes (automation-friendly)
+    # Normal mode: 1 if NEW devices detected (unless --learn)
+    # Strict mode: 1 if UNKNOWN devices detected (unless --learn)
+    if args.learn:
+        return 0
+
+    if args.strict:
+        return 1 if unknown_count > 0 else 0
+
+    return 1 if new_count > 0 else 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -127,6 +140,12 @@ def build_parser() -> argparse.ArgumentParser:
     scan_cmd.add_argument("--db", default="devices_db.json", help="Path to device database JSON")
     scan_cmd.add_argument("--no-db", action="store_true", help="Do not load/save device DB")
     scan_cmd.add_argument("--learn", action="store_true", help="Learn baseline: treat all seen devices as known")
+
+    scan_cmd.add_argument(
+        "--strict",
+        action="store_true",
+        help="Strict mode: treat allowlist as source of truth; flag anything not in allowlist as Unknown.",
+    )
 
     scan_cmd.add_argument(
         "--method",

@@ -55,3 +55,9 @@ desktop.ini
 
 *.tmp
 *.bak
+
+# -------------------------
+# Allowlist file (contains user-defined device names)
+# -------------------------
+
+allowlist.json
