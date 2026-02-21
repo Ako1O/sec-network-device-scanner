@@ -8,11 +8,17 @@ A small security-focused tool that scans your local network for connected device
 
 ## Features
 
-- **Local network scan** to discover connected hosts (IP + MAC)
-- **Manufacturer detection** via MAC OUI lookup (e.g., Apple, Intel, TP-Link)
-- **Flag unknown devices** (not seen before / not on your allowlist)
-- **Dashboard-style output** (terminal table first; optional web dashboard later)
-- **Export results** to JSON/CSV for tracking and automation
+-  Smart subnet auto-detection (handles VPNs / virtual adapters)
+-  Windows-friendly fallback scanning (no Npcap required)
+-  MAC OUI manufacturer detection
+-  Strict allowlist mode (security monitoring)
+-  Device baseline database (detect newly seen devices)
+-  Gateway role detection (clearly marks network gateway)
+-  Watch mode (continuous monitoring)
+-  JSON / NDJSON output for scripting & CI
+-  Concurrency control (`--max-workers`)
+-  Automation-ready exit codes
+
 
 ---
 
@@ -45,22 +51,22 @@ source .venv/bin/activate
 # Windows (PowerShell)
 # .\.venv\Scripts\Activate.ps1
 
-pip install -r requirements.txt
+pip install -e .
 ```
 
 ---
 ## Usage
 ### Basic scan
 ```bash
-python -m sec_network_device_scanner scan
+sec-network-device-scanner scan
 ```
 ### Save results
 ```bash
-python -m sec_network_device_scanner scan --out results.json
+sec-network-device-scanner scan --out results.json
 ```
 ### Use an allowlist (known devices)
 ```bash
-python -m sec_network_device_scanner scan --allow allowlist.json
+sec-network-device-scanner scan --allow allowlist.json
 ```
 
 ### Example allowlist.json:
@@ -85,6 +91,21 @@ IP             MAC                Manufacturer          Status
 192.168.0.23   AA:BB:CC:11:22:33  Lenovo               Known
 192.168.0.42   10:20:30:40:50:60  (unknown)            ⚠ Unknown
 ...
+```
+
+### JSON Output to sdout:
+```JSON
+{
+  "timestamp_utc": "...",
+  "network": "10.175.142.0/24",
+  "gateway_ip": "10.175.142.245",
+  "counts": {
+    "found": 1,
+    "new": 0,
+    "unknown": 0
+  },
+  "devices": [...]
+}
 ```
 
 ### Exit codes (automation-friendly)
