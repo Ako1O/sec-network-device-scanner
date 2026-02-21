@@ -1,18 +1,23 @@
 from __future__ import annotations
 
 import argparse
+import json
+import time
+from datetime import datetime
+from pathlib import Path
 
 from rich.console import Console
 from rich.table import Table
 
 from .allowlist import load_allowlist, normalize_mac
 from .oui import OUILookup
-from .scanner import get_default_gateway, resolve_cidr, scan
+from .scanner import get_gateway_for_network, resolve_cidr, scan
 from .storage import load_db, save_db, upsert_seen
 
 
 def _build_table() -> Table:
     t = Table(title="sec-network-device-scanner", show_lines=False)
+    t.add_column("Role")
     t.add_column("IP", style="bold")
     t.add_column("MAC")
     t.add_column("Manufacturer")
@@ -21,26 +26,27 @@ def _build_table() -> Table:
     return t
 
 
-def cmd_scan(args: argparse.Namespace) -> int:
-    console = Console()
-
+def _run_single_scan(args: argparse.Namespace, console: Console) -> int:
     allow = load_allowlist(args.allow)
     oui = OUILookup()
-    gateway_ip = get_default_gateway()
 
-    network = resolve_cidr(args.cidr)
+    network = resolve_cidr(getattr(args, "cidr", None))
+    gateway_ip = get_gateway_for_network(network)
+
     console.print(f"[dim]Scanning:[/dim] {network}")
 
     devices = scan(network, timeout=args.timeout, method=args.method)
-
     db = {} if args.no_db else load_db(args.db)
 
     new_count = 0
     unknown_count = 0
 
     table = _build_table()
+    rows_out: list[dict[str, str]] = []
 
     for d in devices:
+        role = "Gateway" if (gateway_ip and d.ip == gateway_ip) else "Client"
+
         mac_norm = normalize_mac(d.mac)
         manufacturer = oui.manufacturer(mac_norm) or "(unknown)"
 
@@ -53,10 +59,8 @@ def cmd_scan(args: argparse.Namespace) -> int:
             if is_new:
                 new_count += 1
 
-        # Gateway label takes priority
-        if d.ip == gateway_ip:
-            status = "Gateway"
-        elif args.learn:
+        # Status logic (independent from Role)
+        if args.learn:
             status = "Known"
         elif args.strict:
             if in_allow:
@@ -77,7 +81,17 @@ def cmd_scan(args: argparse.Namespace) -> int:
 
         name = allowed.name if allowed and allowed.name else ""
 
-        table.add_row(d.ip, mac_norm, manufacturer, status, name)
+        table.add_row(role, d.ip, mac_norm, manufacturer, status, name)
+        rows_out.append(
+            {
+                "role": role,
+                "ip": d.ip,
+                "mac": mac_norm,
+                "manufacturer": manufacturer,
+                "status": status,
+                "name": name,
+            }
+        )
 
     if not args.no_db:
         save_db(args.db, db)
@@ -90,36 +104,80 @@ def cmd_scan(args: argparse.Namespace) -> int:
     )
     console.print(table)
 
+    if getattr(args, "out", None):
+        out_path = Path(args.out)
+        out_path.write_text(
+            json.dumps({"network": str(network), "devices": rows_out}, indent=2),
+            encoding="utf-8",
+        )
+        console.print(f"\n[dim]Saved:[/dim] {out_path}")
+
     if args.learn:
         return 0
-
     if args.strict:
         return 1 if unknown_count > 0 else 0
-
     return 1 if new_count > 0 else 0
+
+
+def cmd_scan(args: argparse.Namespace) -> int:
+    console = Console()
+    return _run_single_scan(args, console)
+
+
+def cmd_watch(args: argparse.Namespace) -> int:
+    console = Console()
+    interval = max(1, int(args.interval))
+
+    console.print(
+        f"[dim]Watch mode:[/dim] interval={interval}s  "
+        f"method={args.method}  "
+        f"{'STRICT' if args.strict else 'NORMAL'}"
+    )
+
+    while True:
+        console.rule(f"[bold]{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}[/bold]")
+        code = _run_single_scan(args, console)
+
+        if code != 0:
+            console.print("\n[red]Alert condition met.[/red] Exiting watch mode.")
+            return code
+
+        time.sleep(interval)
 
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="sec-network-device-scanner")
     sub = p.add_subparsers(dest="cmd", required=True)
 
+    def add_common_flags(cmd: argparse.ArgumentParser) -> None:
+        cmd.add_argument("--cidr", help="Target network in CIDR, e.g. 192.168.1.0/24")
+        cmd.add_argument("--timeout", type=int, default=2, help="Scan timeout seconds (scapy mode)")
+        cmd.add_argument("--allow", help="Allowlist JSON file")
+        cmd.add_argument("--db", default="devices_db.json", help="Path to device DB JSON")
+        cmd.add_argument("--no-db", action="store_true", help="Do not load/save device DB")
+        cmd.add_argument("--learn", action="store_true", help="Learn baseline: treat all seen devices as known")
+        cmd.add_argument(
+            "--strict",
+            action="store_true",
+            help="Strict mode: anything not in allowlist is Unknown (exit 1 in watch).",
+        )
+        cmd.add_argument(
+            "--method",
+            default="auto",
+            choices=["auto", "scapy", "windows"],
+            help="Scan method: auto/scapy/windows",
+        )
+
     scan_cmd = sub.add_parser("scan", help="Scan network and list devices")
-
-    scan_cmd.add_argument("--cidr")
-    scan_cmd.add_argument("--timeout", type=int, default=2)
-    scan_cmd.add_argument("--allow")
-    scan_cmd.add_argument("--db", default="devices_db.json")
-    scan_cmd.add_argument("--no-db", action="store_true")
-    scan_cmd.add_argument("--learn", action="store_true")
-    scan_cmd.add_argument("--strict", action="store_true")
-
-    scan_cmd.add_argument(
-        "--method",
-        default="auto",
-        choices=["auto", "scapy", "windows"],
-    )
-
+    add_common_flags(scan_cmd)
+    scan_cmd.add_argument("--out", help="Write results to JSON")
     scan_cmd.set_defaults(func=cmd_scan)
+
+    watch_cmd = sub.add_parser("watch", help="Continuously scan until alert condition is met")
+    add_common_flags(watch_cmd)
+    watch_cmd.add_argument("--interval", type=int, default=30, help="Seconds between scans")
+    watch_cmd.set_defaults(func=cmd_watch)
+
     return p
 
 

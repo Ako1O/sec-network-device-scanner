@@ -23,36 +23,80 @@ class Device:
 
 
 # -------------------------------------------------
-# Gateway Detection
+# Gateway + Network Detection
 # -------------------------------------------------
 
-def get_default_gateway() -> str | None:
+def _get_default_gateway_ipconfig_windows() -> str | None:
     """
-    Best-effort default gateway detection.
-    - Windows: parse `ipconfig`
-    - Linux/macOS: parse `ip route`
+    Best-effort fallback gateway detection via ipconfig (can pick VPN gateway).
     """
-    system = platform.system().lower()
     try:
-        if system.startswith("win"):
-            output = subprocess.check_output(["ipconfig"], text=True, errors="ignore")
-            # Example: "Default Gateway . . . . . . . . . : 10.175.142.245"
-            match = re.search(r"Default Gateway[ .:]+(\d+\.\d+\.\d+\.\d+)", output)
-            if match:
-                return match.group(1)
-        else:
-            output = subprocess.check_output(["ip", "route"], text=True, errors="ignore")
-            match = re.search(r"default via (\d+\.\d+\.\d+\.\d+)", output)
-            if match:
-                return match.group(1)
+        output = subprocess.check_output(["ipconfig"], text=True, errors="ignore")
+        match = re.search(r"Default Gateway[ .:]+(\d+\.\d+\.\d+\.\d+)", output)
+        if match:
+            return match.group(1)
     except Exception:
         return None
     return None
 
 
-# -------------------------------------------------
-# Network detection
-# -------------------------------------------------
+def get_gateway_for_network(network: ipaddress.IPv4Network) -> str | None:
+    """
+    Return the default gateway IP that belongs to the given `network` (best effort).
+    On Windows: parse `route.exe print -4` and pick the default route whose Interface IP is in `network`.
+    On Linux/macOS: parse `ip route` default via (usually OK because network selection is already sane).
+    """
+    system = platform.system().lower()
+
+    if system.startswith("win"):
+        try:
+            out = subprocess.check_output(["route", "print", "-4"], text=True, errors="ignore")
+            # Lines look like:
+            # 0.0.0.0          0.0.0.0      10.175.142.245   10.175.142.179     25
+            pattern = re.compile(
+                r"^\s*0\.0\.0\.0\s+0\.0\.0\.0\s+"
+                r"(?P<gw>\d{1,3}(?:\.\d{1,3}){3})\s+"
+                r"(?P<iface>\d{1,3}(?:\.\d{1,3}){3})\s+"
+                r"(?P<metric>\d+)\s*$"
+            )
+
+            candidates: list[tuple[int, str]] = []  # (metric, gateway)
+            for line in out.splitlines():
+                m = pattern.match(line)
+                if not m:
+                    continue
+                gw = m.group("gw")
+                iface_ip = m.group("iface")
+                metric = int(m.group("metric"))
+
+                try:
+                    if ipaddress.IPv4Address(iface_ip) in network and ipaddress.IPv4Address(gw) in network:
+                        candidates.append((metric, gw))
+                except ValueError:
+                    continue
+
+            if candidates:
+                candidates.sort(key=lambda x: x[0])
+                return candidates[0][1]
+
+            # Fallback (may be VPN): ipconfig gateway
+            return _get_default_gateway_ipconfig_windows()
+        except Exception:
+            return _get_default_gateway_ipconfig_windows()
+
+    # Linux/macOS
+    try:
+        out = subprocess.check_output(["ip", "route"], text=True, errors="ignore")
+        m = re.search(r"default via (\d+\.\d+\.\d+\.\d+)", out)
+        if m:
+            gw = m.group(1)
+            if ipaddress.IPv4Address(gw) in network:
+                return gw
+            return gw
+    except Exception:
+        return None
+    return None
+
 
 def list_ipv4_candidates() -> list[ipaddress.IPv4Network]:
     candidates: list[ipaddress.IPv4Network] = []
@@ -67,18 +111,16 @@ def list_ipv4_candidates() -> list[ipaddress.IPv4Network]:
 
             ip = ipaddress.IPv4Address(a.address)
             net = ipaddress.IPv4Network(f"{ip}/{a.netmask}", strict=False)
-
-            # Avoid tiny networks like /32
             if net.prefixlen <= 30:
                 candidates.append(net)
 
-    # De-dup while preserving order
+    # de-dup
     seen: set[str] = set()
     unique: list[ipaddress.IPv4Network] = []
     for n in candidates:
-        key = str(n)
-        if key not in seen:
-            seen.add(key)
+        s = str(n)
+        if s not in seen:
+            seen.add(s)
             unique.append(n)
     return unique
 
@@ -86,32 +128,26 @@ def list_ipv4_candidates() -> list[ipaddress.IPv4Network]:
 def _pick_ipv4_network_smart() -> ipaddress.IPv4Network:
     """
     Smart selection:
-    1) detect default gateway
-    2) prefer networks that contain gateway
-    3) ignore huge networks (/8, /9, /10, etc.)
-    4) prefer most specific reasonable network
+    - prefer "reasonable" networks (>= /16)
+    - if there is a gateway, pick the most specific network that contains it
+    - fallback to most specific reasonable network
     """
-
     candidates = list_ipv4_candidates()
-    gw = get_default_gateway()
+    reasonable = [n for n in candidates if n.prefixlen >= 16] or candidates
 
-    # Filter out extremely large networks (e.g. /8)
-    reasonable = [n for n in candidates if n.prefixlen >= 16]
-
-    if not reasonable:
-        reasonable = candidates
-
-    if gw:
-        gw_ip = ipaddress.IPv4Address(gw)
-        matches = [n for n in reasonable if gw_ip in n]
-
-        if matches:
-            # Prefer most specific (largest prefix)
-            matches.sort(key=lambda n: n.prefixlen, reverse=True)
-            return matches[0]
+    # Try to choose by any detected gateway (ipconfig fallback)
+    gw_guess = _get_default_gateway_ipconfig_windows() if platform.system().lower().startswith("win") else None
+    if gw_guess:
+        try:
+            gw_ip = ipaddress.IPv4Address(gw_guess)
+            matches = [n for n in reasonable if gw_ip in n]
+            if matches:
+                matches.sort(key=lambda n: n.prefixlen, reverse=True)
+                return matches[0]
+        except ValueError:
+            pass
 
     if reasonable:
-        # Fallback to most specific reasonable network
         reasonable.sort(key=lambda n: n.prefixlen, reverse=True)
         return reasonable[0]
 
@@ -148,9 +184,6 @@ def _is_valid_device(ip: str, mac: str) -> bool:
 # -------------------------------------------------
 
 def _arp_scan_scapy(network: ipaddress.IPv4Network, timeout: int = 2) -> list[Device]:
-    """
-    True ARP sweep using Scapy (Layer 2). Requires Npcap on Windows.
-    """
     if ARP is None or Ether is None or srp is None:
         raise RuntimeError("Scapy is not available for L2 scanning.")
 
@@ -170,10 +203,6 @@ def _arp_scan_scapy(network: ipaddress.IPv4Network, timeout: int = 2) -> list[De
 # -------------------------------------------------
 
 def _probe_windows(ip: str) -> None:
-    """
-    Send a tiny UDP packet to force Windows to ARP-resolve the target IP.
-    This can discover hosts even if ICMP ping is blocked.
-    """
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
             s.settimeout(0.05)
@@ -210,7 +239,6 @@ def _arp_scan_windows(network: ipaddress.IPv4Network) -> list[Device]:
 
     arp_output = subprocess.check_output(["arp", "-a"], text=True, errors="ignore")
     devices = _parse_windows_arp(arp_output)
-
     return [d for d in devices if ipaddress.IPv4Address(d.ip) in network]
 
 
@@ -219,12 +247,6 @@ def _arp_scan_windows(network: ipaddress.IPv4Network) -> list[Device]:
 # -------------------------------------------------
 
 def scan(network: ipaddress.IPv4Network, timeout: int = 2, method: str = "auto") -> list[Device]:
-    """
-    method:
-      - auto: Scapy first, fallback on Windows
-      - scapy: force Layer 2 ARP scan
-      - windows: force Windows UDP-probe + arp -a fallback
-    """
     method = method.lower().strip()
     is_windows = platform.system().lower().startswith("win")
 
@@ -236,7 +258,6 @@ def scan(network: ipaddress.IPv4Network, timeout: int = 2, method: str = "auto")
             raise RuntimeError("Windows scan method is only available on Windows.")
         return _arp_scan_windows(network)
 
-    # auto
     try:
         return _arp_scan_scapy(network, timeout)
     except Exception:
