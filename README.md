@@ -37,7 +37,7 @@ A small security-focused tool that scans your local network for connected device
 
 ### Requirements
 - Python **3.11+** recommended (3.12 works great)
-- Works best on Linux/macOS; Windows is possible but may require extra permissions
+- Fully supported on Windows (Npcap optional for advanced scanning).
 
 ### Setup
 
@@ -56,6 +56,15 @@ pip install -e .
 
 ---
 ## Usage
+
+### Strict / Watch examples
+
+- ```--strict```
+- ```watch```
+- ```--json```
+- ```--show-nets```
+- ```--max-workers```
+
 ### Basic scan
 ```bash
 sec-network-device-scanner scan
@@ -83,10 +92,8 @@ sec-network-device-scanner scan --allow allowlist.json
 ## Output example
 
 ### Example terminal dashboard output:
-```code
-Found: 7 devices  |  Unknown: 2
-
- Role    ┃ IP     ┃ MAC     ┃ Manufacturer     ┃ Status     ┃ Name              
+```Plain text
+Role ┃ IP ┃ MAC ┃ Manufacturer ┃ Status ┃ Name           
 ...
 ```
 
@@ -128,8 +135,7 @@ sec-network-device-scanner/
 ├─ tests/
 ├─ .github/workflows/
 ├─ pyproject.toml
-├─ README.md
-└─ requirements.txt
+└─ README.md
 ```
 ---
 ## Security notes / limitations
