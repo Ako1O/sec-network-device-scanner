@@ -22,7 +22,7 @@ def load_allowlist(path: str | Path | None) -> dict[str, AllowedDevice]:
     Returns mapping: normalized_mac -> AllowedDevice
     Accepts:
     {
-      "devices": [{"mac": "7E:44:FC:BF:04:16", "name": "Phone tether gateway"}]
+      "devices": [{"mac": "...", "name": "..."}]
     }
     """
     if path is None:

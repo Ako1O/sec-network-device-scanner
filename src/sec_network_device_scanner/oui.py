@@ -7,6 +7,7 @@ class OUILookup:
     """
     Thin wrapper around `manuf` OUI database.
     """
+
     def __init__(self) -> None:
         self._parser = manuf.MacParser()
 

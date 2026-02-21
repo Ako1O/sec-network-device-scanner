@@ -10,7 +10,6 @@ from dataclasses import dataclass
 
 import psutil
 
-# Optional Scapy import (may fail on Windows without Npcap)
 try:
     from scapy.all import ARP, Ether, srp  # type: ignore
 except Exception:  # pragma: no cover
@@ -23,23 +22,32 @@ class Device:
     mac: str
 
 
-def _is_valid_device(ip: str, mac: str) -> bool:
-    """
-    Filter out broadcast / multicast / invalid entries that can appear in arp tables.
-    """
-    mac_u = mac.upper()
+# -------------------------------------------------
+# Gateway Detection
+# -------------------------------------------------
 
-    if mac_u in {"FF:FF:FF:FF:FF:FF", "00:00:00:00:00:00"}:
-        return False
-
+def get_default_gateway() -> str | None:
+    """
+    Best-effort default gateway detection.
+    - Windows: parse `ipconfig`
+    - Linux/macOS: parse `ip route`
+    """
+    system = platform.system().lower()
     try:
-        ip_obj = ipaddress.IPv4Address(ip)
-        if ip_obj.is_multicast or ip_obj.is_unspecified or ip_obj.is_reserved:
-            return False
-    except ValueError:
-        return False
-
-    return True
+        if system.startswith("win"):
+            output = subprocess.check_output(["ipconfig"], text=True, errors="ignore")
+            # Example: "Default Gateway . . . . . . . . . : 10.175.142.245"
+            match = re.search(r"Default Gateway[ .:]+(\d+\.\d+\.\d+\.\d+)", output)
+            if match:
+                return match.group(1)
+        else:
+            output = subprocess.check_output(["ip", "route"], text=True, errors="ignore")
+            match = re.search(r"default via (\d+\.\d+\.\d+\.\d+)", output)
+            if match:
+                return match.group(1)
+    except Exception:
+        return None
+    return None
 
 
 # -------------------------------------------------
@@ -56,31 +64,56 @@ def list_ipv4_candidates() -> list[ipaddress.IPv4Network]:
                 continue
             if not a.netmask:
                 continue
+
             ip = ipaddress.IPv4Address(a.address)
             net = ipaddress.IPv4Network(f"{ip}/{a.netmask}", strict=False)
+
+            # Avoid tiny networks like /32
             if net.prefixlen <= 30:
                 candidates.append(net)
-    return candidates
+
+    # De-dup while preserving order
+    seen: set[str] = set()
+    unique: list[ipaddress.IPv4Network] = []
+    for n in candidates:
+        key = str(n)
+        if key not in seen:
+            seen.add(key)
+            unique.append(n)
+    return unique
 
 
-def _pick_ipv4_network() -> ipaddress.IPv4Network:
+def _pick_ipv4_network_smart() -> ipaddress.IPv4Network:
     """
-    Best-effort: choose the first non-loopback interface IPv4 + netmask.
+    Smart selection:
+    1) detect default gateway
+    2) prefer networks that contain gateway
+    3) ignore huge networks (/8, /9, /10, etc.)
+    4) prefer most specific reasonable network
     """
-    for _, addrs in psutil.net_if_addrs().items():
-        for a in addrs:
-            if a.family.name != "AF_INET":
-                continue
-            if not a.address or a.address.startswith("127."):
-                continue
-            if not a.netmask:
-                continue
 
-            ip = ipaddress.IPv4Address(a.address)
-            net = ipaddress.IPv4Network(f"{ip}/{a.netmask}", strict=False)
+    candidates = list_ipv4_candidates()
+    gw = get_default_gateway()
 
-            if net.prefixlen <= 30:
-                return net
+    # Filter out extremely large networks (e.g. /8)
+    reasonable = [n for n in candidates if n.prefixlen >= 16]
+
+    if not reasonable:
+        reasonable = candidates
+
+    if gw:
+        gw_ip = ipaddress.IPv4Address(gw)
+        matches = [n for n in reasonable if gw_ip in n]
+
+        if matches:
+            # Prefer most specific (largest prefix)
+            matches.sort(key=lambda n: n.prefixlen, reverse=True)
+            return matches[0]
+
+    if reasonable:
+        # Fallback to most specific reasonable network
+        reasonable.sort(key=lambda n: n.prefixlen, reverse=True)
+        return reasonable[0]
 
     raise RuntimeError("Could not auto-detect local IPv4 network. Use --cidr.")
 
@@ -88,7 +121,26 @@ def _pick_ipv4_network() -> ipaddress.IPv4Network:
 def resolve_cidr(cidr: str | None) -> ipaddress.IPv4Network:
     if cidr:
         return ipaddress.IPv4Network(cidr, strict=False)
-    return _pick_ipv4_network()
+    return _pick_ipv4_network_smart()
+
+
+# -------------------------------------------------
+# Device filtering
+# -------------------------------------------------
+
+def _is_valid_device(ip: str, mac: str) -> bool:
+    mac_u = mac.upper()
+    if mac_u in {"FF:FF:FF:FF:FF:FF", "00:00:00:00:00:00"}:
+        return False
+
+    try:
+        ip_obj = ipaddress.IPv4Address(ip)
+        if ip_obj.is_multicast or ip_obj.is_unspecified or ip_obj.is_reserved:
+            return False
+    except ValueError:
+        return False
+
+    return True
 
 
 # -------------------------------------------------
@@ -97,8 +149,7 @@ def resolve_cidr(cidr: str | None) -> ipaddress.IPv4Network:
 
 def _arp_scan_scapy(network: ipaddress.IPv4Network, timeout: int = 2) -> list[Device]:
     """
-    True ARP sweep using Scapy (Layer 2).
-    Requires Npcap on Windows.
+    True ARP sweep using Scapy (Layer 2). Requires Npcap on Windows.
     """
     if ARP is None or Ether is None or srp is None:
         raise RuntimeError("Scapy is not available for L2 scanning.")
