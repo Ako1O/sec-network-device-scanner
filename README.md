@@ -46,3 +46,77 @@ source .venv/bin/activate
 # .\.venv\Scripts\Activate.ps1
 
 pip install -r requirements.txt
+```
+
+---
+## Usage
+### Basic scan
+```bash
+python -m sec_network_device_scanner scan
+```
+### Save results
+```bash
+python -m sec_network_device_scanner scan --out results.json
+```
+### Use an allowlist (known devices)
+```bash
+python -m sec_network_device_scanner scan --allow allowlist.json
+```
+
+### Example allowlist.json:
+```JSON
+{
+  "devices": [
+    { "mac": "AA:BB:CC:11:22:33", "name": "My Laptop" },
+    { "mac": "44:55:66:77:88:99", "name": "Router" }
+  ]
+}
+```
+
+---
+## Output example
+
+### Example terminal dashboard output:
+```code
+Found: 7 devices  |  Unknown: 2
+
+IP             MAC                Manufacturer          Status
+192.168.0.1    44:55:66:77:88:99  MikroTik             Known
+192.168.0.23   AA:BB:CC:11:22:33  Lenovo               Known
+192.168.0.42   10:20:30:40:50:60  (unknown)            ⚠ Unknown
+...
+```
+
+### Exit codes (automation-friendly)
+Designed for scripts/CI and security workflows:
+
+| Code | Meaning                                                |
+| ---- | ------------------------------------------------------ |
+| 0    | No unknown devices found                               |
+| 1    | At least one unknown device found                      |
+| 2    | Runtime error (permissions, interface not found, etc.) |
+
+---
+
+## Project Structure:
+``` Plain text
+sec-network-device-scanner/
+├─ src/sec_network_device_scanner/
+│  ├─ __init__.py
+│  ├─ cli.py
+│  ├─ scanner.py
+│  ├─ oui.py
+│  └─ storage.py
+├─ tests/
+├─ .github/workflows/
+├─ pyproject.toml
+├─ README.md
+└─ requirements.txt
+```
+---
+## Security notes / limitations
+
+This tool is meant for networks you own or have permission to test.
+Results depend on local network visibility (VLANs, client isolation, firewall rules, etc.).
+Manufacturer detection is best-effort; OUI databases can be incomplete.
+Some devices may hide MAC addresses or appear behind NAT.
