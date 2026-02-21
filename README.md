@@ -86,10 +86,7 @@ sec-network-device-scanner scan --allow allowlist.json
 ```code
 Found: 7 devices  |  Unknown: 2
 
-IP             MAC                Manufacturer          Status
-192.168.0.1    44:55:66:77:88:99  MikroTik             Known
-192.168.0.23   AA:BB:CC:11:22:33  Lenovo               Known
-192.168.0.42   10:20:30:40:50:60  (unknown)            ⚠ Unknown
+ Role    ┃ IP     ┃ MAC     ┃ Manufacturer     ┃ Status     ┃ Name              
 ...
 ```
 
