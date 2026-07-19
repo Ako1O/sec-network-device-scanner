@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from rich.console import Console
@@ -27,7 +28,7 @@ def _build_table() -> Table:
 
 
 def _now_iso_utc() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _maybe_show_nets(console: Console, selected: str) -> None:
@@ -174,7 +175,8 @@ def cmd_scan(args: argparse.Namespace) -> int:
 
     # Optional: also write JSON payload to a file (same schema as stdout)
     if args.out and args.json:
-        Path(args.out).write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        text = json.dumps(payload, indent=2, ensure_ascii=False)
+        Path(args.out).write_text(text, encoding="utf-8")
 
     return code
 
@@ -219,8 +221,12 @@ def build_parser() -> argparse.ArgumentParser:
         cmd.add_argument("--allow", help="Allowlist JSON file")
         cmd.add_argument("--db", default="devices_db.json", help="Path to device DB JSON")
         cmd.add_argument("--no-db", action="store_true", help="Do not load/save device DB")
-        cmd.add_argument("--learn", action="store_true", help="Learn baseline: treat all seen devices as known")
-        cmd.add_argument("--strict", action="store_true", help="Strict mode: not in allowlist => Unknown")
+        cmd.add_argument(
+            "--learn", action="store_true", help="Learn baseline: treat all seen devices as known"
+        )
+        cmd.add_argument(
+            "--strict", action="store_true", help="Strict mode: not in allowlist => Unknown"
+        )
         cmd.add_argument(
             "--method",
             default="auto",
@@ -258,13 +264,22 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    # Some Windows terminals default to a legacy codepage that can't encode
+    # the status symbols we print (e.g. the "unknown device" marker).
+    for stream in (sys.stdout, sys.stderr):
+        if stream is not None and getattr(stream, "encoding", "").lower() != "utf-8":
+            try:
+                stream.reconfigure(encoding="utf-8")
+            except Exception:
+                pass
+
     try:
         parser = build_parser()
         args = parser.parse_args()
         code = args.func(args)
         raise SystemExit(code)
     except KeyboardInterrupt:
-        raise SystemExit(2)
+        raise SystemExit(2) from None
     except Exception as e:
         Console().print(f"[red]Error:[/red] {e}")
-        raise SystemExit(2)
+        raise SystemExit(2) from e

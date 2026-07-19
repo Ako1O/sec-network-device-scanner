@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Network Device Scanner — Report Viewer</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --text-dim: #8b949e;
+    --green: #3fb950;
+    --amber: #d29922;
+    --red: #f85149;
+    --blue: #58a6ff;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  code, .mono {
+    font-family: ui-monospace, "Cascadia Mono", "Consolas", "SFMono-Regular", monospace;
+  }
+
+  .wrap {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 40px 24px 64px;
+  }
+
+  header h1 {
+    margin: 0 0 6px;
+    font-size: 22px;
+    font-weight: 600;
+  }
+
+  header p {
+    margin: 0;
+    color: var(--text-dim);
+    max-width: 640px;
+  }
+
+  hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 28px 0;
+  }
+
+  .columns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+
+  @media (max-width: 760px) {
+    .columns { grid-template-columns: 1fr; }
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 20px;
+  }
+
+  .panel h2 {
+    margin: 0 0 6px;
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  .panel .sub {
+    margin: 0 0 16px;
+    color: var(--text-dim);
+    font-size: 13px;
+  }
+
+  .drop {
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+    padding: 26px 16px;
+    text-align: center;
+    color: var(--text-dim);
+    cursor: pointer;
+    background: #0d1117;
+  }
+
+  .drop:hover { border-color: var(--blue); }
+  .drop.drag { border-color: var(--blue); color: var(--text); }
+
+  .drop .fname {
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  input[type="file"] { display: none; }
+
+  .btn-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  button {
+    font: inherit;
+    background: #21262d;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 12px;
+    cursor: pointer;
+  }
+
+  button:hover { border-color: var(--blue); }
+  button.primary { border-color: var(--green); color: var(--green); }
+
+  .status-line {
+    margin-top: 14px;
+    padding: 10px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    display: none;
+  }
+
+  .status-line.show { display: block; }
+
+  .status-line.ok {
+    background: rgba(63, 185, 80, 0.1);
+    border: 1px solid rgba(63, 185, 80, 0.4);
+    color: var(--green);
+  }
+
+  .status-line.err {
+    background: rgba(248, 81, 73, 0.1);
+    border: 1px solid rgba(248, 81, 73, 0.4);
+    color: var(--red);
+  }
+
+  dl.meta {
+    margin: 0;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    row-gap: 8px;
+    column-gap: 14px;
+    font-size: 13px;
+  }
+
+  dl.meta dt { color: var(--text-dim); }
+  dl.meta dd { margin: 0; }
+
+  .legend {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    font-size: 13px;
+  }
+
+  .legend li {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 6px 0;
+    border-top: 1px solid var(--border);
+  }
+
+  .legend li:first-child { border-top: none; }
+  .legend .desc { color: var(--text-dim); text-align: right; }
+
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin: 28px 0 20px;
+  }
+
+  @media (max-width: 620px) {
+    .stats { grid-template-columns: repeat(2, 1fr); }
+  }
+
+  .stat {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px 16px;
+  }
+
+  .stat .n { font-size: 22px; font-weight: 700; }
+  .stat .l { color: var(--text-dim); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+
+  .toolbar {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+  }
+
+  .toolbar input[type="text"], .toolbar select {
+    font: inherit;
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 10px;
+  }
+
+  .toolbar input[type="text"] { flex: 1; min-width: 180px; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  thead th {
+    text-align: left;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-dim);
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  tbody td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+  }
+
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover { background: rgba(255, 255, 255, 0.02); }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    border: 1px solid transparent;
+  }
+
+  .badge-known   { color: var(--green); border-color: rgba(63, 185, 80, 0.4); background: rgba(63, 185, 80, 0.1); }
+  .badge-allowed { color: var(--blue);  border-color: rgba(88, 166, 255, 0.4); background: rgba(88, 166, 255, 0.1); }
+  .badge-new     { color: var(--amber); border-color: rgba(210, 153, 34, 0.4); background: rgba(210, 153, 34, 0.1); }
+  .badge-unknown { color: var(--red);   border-color: rgba(248, 81, 73, 0.4); background: rgba(248, 81, 73, 0.1); }
+
+  .empty {
+    padding: 24px;
+    text-align: center;
+    color: var(--text-dim);
+  }
+
+  footer {
+    margin-top: 36px;
+    color: var(--text-dim);
+    font-size: 12px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>Network Device Scanner</h1>
+    <p>Local network visibility: see which devices are on the network, identify their manufacturer, and flag anything that hasn't been seen before. This page reads a report produced by the command-line tool and displays it — nothing is uploaded anywhere.</p>
+  </header>
+
+  <hr />
+
+  <div class="columns">
+    <div class="panel">
+      <h2>Load a report</h2>
+      <p class="sub">Open a JSON file produced by <code>scan --out report.json</code>, or keep the sample data loaded below.</p>
+
+      <div class="drop" id="drop">
+        <div id="dropLabel">Click to choose a file, or drag one here</div>
+      </div>
+      <input type="file" id="fileInput" accept="application/json,.json" />
+
+      <div class="btn-row">
+        <button class="primary" id="sampleBtn">Load sample report</button>
+      </div>
+
+      <div class="status-line" id="statusLine"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Report summary</h2>
+      <p class="sub">Metadata from the loaded scan.</p>
+      <dl class="meta" id="metaList">
+        <dt>Network</dt><dd id="metaNetwork">—</dd>
+        <dt>Gateway</dt><dd id="metaGateway">—</dd>
+        <dt>Scanned at</dt><dd id="metaTime">—</dd>
+        <dt>Mode</dt><dd id="metaMode">—</dd>
+      </dl>
+      <hr style="margin: 16px 0;" />
+      <ul class="legend">
+        <li><span>Known / Allowed</span><span class="desc">Seen before, or listed in your allowlist</span></li>
+        <li><span>New</span><span class="desc">First time this device has been seen</span></li>
+        <li><span>Unknown</span><span class="desc">Not on the allowlist (strict mode)</span></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="n" id="statFound">0</div><div class="l">Devices found</div></div>
+    <div class="stat"><div class="n" id="statKnown">0</div><div class="l">Known / allowed</div></div>
+    <div class="stat"><div class="n" id="statNew">0</div><div class="l">New</div></div>
+    <div class="stat"><div class="n" id="statUnknown">0</div><div class="l">Unknown</div></div>
+  </div>
+
+  <div class="toolbar">
+    <input type="text" id="search" placeholder="Filter by IP, MAC, manufacturer or name" />
+    <select id="statusFilter">
+      <option value="all">All statuses</option>
+      <option value="known">Known / Allowed</option>
+      <option value="new">New</option>
+      <option value="unknown">Unknown</option>
+    </select>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Role</th>
+        <th>IP address</th>
+        <th>MAC address</th>
+        <th>Manufacturer</th>
+        <th>Status</th>
+        <th>Name</th>
+      </tr>
+    </thead>
+    <tbody id="tableBody"></tbody>
+  </table>
+
+  <footer>
+    Everything on this page runs in your browser. Files you open are never sent anywhere.
+  </footer>
+
+</div>
+
+<script>
+  const SAMPLE_REPORT = {
+    timestamp_utc: "2026-07-18T09:14:02+00:00",
+    network: "192.168.1.0/24",
+    gateway_ip: "192.168.1.1",
+    counts: { found: 6, new: 1, unknown: 1 },
+    devices: [
+      { role: "Gateway", ip: "192.168.1.1",  mac: "AA:11:22:33:44:00", manufacturer: "TP-Link",              status: "Known",     name: "Home Router" },
+      { role: "Client",  ip: "192.168.1.10", mac: "3C:22:FB:10:20:30", manufacturer: "Apple",                status: "Allowed",   name: "Alex's MacBook" },
+      { role: "Client",  ip: "192.168.1.14", mac: "B8:27:EB:AA:BB:CC", manufacturer: "Raspberry Pi Foundation", status: "Known",   name: "Home Server" },
+      { role: "Client",  ip: "192.168.1.22", mac: "00:1A:11:22:33:44", manufacturer: "Google",               status: "Known",     name: "Living Room Speaker" },
+      { role: "Client",  ip: "192.168.1.37", mac: "F4:5E:AB:10:9B:2C", manufacturer: "Samsung",              status: "⚠ New",     name: "" },
+      { role: "Client",  ip: "192.168.1.63", mac: "12:34:56:78:9A:BC", manufacturer: "(unknown)",            status: "⚠ Unknown", name: "" }
+    ],
+    mode: { strict: false, learn: false, no_db: false, method: "auto", max_workers: 100 }
+  };
+
+  let currentReport = null;
+
+  const dropEl = document.getElementById("drop");
+  const dropLabel = document.getElementById("dropLabel");
+  const fileInput = document.getElementById("fileInput");
+  const sampleBtn = document.getElementById("sampleBtn");
+  const statusLine = document.getElementById("statusLine");
+  const searchEl = document.getElementById("search");
+  const statusFilterEl = document.getElementById("statusFilter");
+
+  function showStatus(message, kind) {
+    statusLine.textContent = message;
+    statusLine.className = "status-line show " + kind;
+  }
+
+  function classifyStatus(rawStatus) {
+    const s = String(rawStatus || "").replace("⚠", "").trim().toLowerCase();
+    if (s === "known" || s === "allowed") return "known";
+    if (s === "new") return "new";
+    return "unknown";
+  }
+
+  function badgeFor(rawStatus) {
+    const kind = classifyStatus(rawStatus);
+    const label = String(rawStatus || "").replace("⚠", "").trim() || "Unknown";
+    return '<span class="badge badge-' + kind + '">' + escapeHtml(label) + "</span>";
+  }
+
+  function escapeHtml(str) {
+    return String(str).replace(/[&<>"']/g, (c) => (
+      { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+    ));
+  }
+
+  function renderMeta(report) {
+    document.getElementById("metaNetwork").textContent = report.network || "—";
+    document.getElementById("metaGateway").textContent = report.gateway_ip || "—";
+    document.getElementById("metaTime").textContent = report.timestamp_utc || "—";
+
+    const mode = report.mode || {};
+    const modeParts = [];
+    if (mode.strict) modeParts.push("strict");
+    if (mode.learn) modeParts.push("learn");
+    if (mode.method) modeParts.push(mode.method);
+    document.getElementById("metaMode").textContent = modeParts.length ? modeParts.join(", ") : "normal";
+  }
+
+  function renderStats(report) {
+    const devices = report.devices || [];
+    const known = devices.filter((d) => classifyStatus(d.status) === "known").length;
+    const newCount = devices.filter((d) => classifyStatus(d.status) === "new").length;
+    const unknownCount = devices.filter((d) => classifyStatus(d.status) === "unknown").length;
+
+    document.getElementById("statFound").textContent = devices.length;
+    document.getElementById("statKnown").textContent = known;
+    document.getElementById("statNew").textContent = newCount;
+    document.getElementById("statUnknown").textContent = unknownCount;
+  }
+
+  function renderTable() {
+    if (!currentReport) return;
+
+    const query = searchEl.value.trim().toLowerCase();
+    const filter = statusFilterEl.value;
+    const tbody = document.getElementById("tableBody");
+    tbody.innerHTML = "";
+
+    const rows = (currentReport.devices || []).filter((d) => {
+      if (filter !== "all" && classifyStatus(d.status) !== filter) return false;
+      if (!query) return true;
+      const haystack = [d.ip, d.mac, d.manufacturer, d.name, d.role].join(" ").toLowerCase();
+      return haystack.includes(query);
+    });
+
+    if (rows.length === 0) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = '<td class="empty" colspan="6">No devices match the current filter.</td>';
+      tbody.appendChild(tr);
+      return;
+    }
+
+    for (const d of rows) {
+      const tr = document.createElement("tr");
+      tr.innerHTML =
+        "<td>" + escapeHtml(d.role || "") + "</td>" +
+        '<td class="mono">' + escapeHtml(d.ip || "") + "</td>" +
+        '<td class="mono">' + escapeHtml(d.mac || "") + "</td>" +
+        "<td>" + escapeHtml(d.manufacturer || "") + "</td>" +
+        "<td>" + badgeFor(d.status) + "</td>" +
+        "<td>" + escapeHtml(d.name || "") + "</td>";
+      tbody.appendChild(tr);
+    }
+  }
+
+  function loadReport(report, sourceLabel) {
+    currentReport = report;
+    searchEl.value = "";
+    statusFilterEl.value = "all";
+    renderMeta(report);
+    renderStats(report);
+    renderTable();
+    const deviceCount = (report.devices || []).length;
+    const deviceWord = deviceCount === 1 ? "device" : "devices";
+    showStatus("Loaded: " + sourceLabel + " (" + deviceCount + " " + deviceWord + ")", "ok");
+  }
+
+  function loadFromFile(file) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(reader.result);
+        if (!Array.isArray(parsed.devices)) {
+          throw new Error("missing 'devices' array");
+        }
+        dropLabel.innerHTML = 'Selected: <span class="fname">' + escapeHtml(file.name) + "</span>";
+        loadReport(parsed, file.name);
+      } catch (err) {
+        showStatus("Could not read this file as a scan report: " + err.message, "err");
+      }
+    };
+    reader.onerror = () => showStatus("Could not read the selected file.", "err");
+    reader.readAsText(file);
+  }
+
+  dropEl.addEventListener("click", () => fileInput.click());
+  fileInput.addEventListener("change", () => {
+    if (fileInput.files && fileInput.files[0]) loadFromFile(fileInput.files[0]);
+  });
+
+  ["dragenter", "dragover"].forEach((evt) =>
+    dropEl.addEventListener(evt, (e) => {
+      e.preventDefault();
+      dropEl.classList.add("drag");
+    })
+  );
+  ["dragleave", "drop"].forEach((evt) =>
+    dropEl.addEventListener(evt, (e) => {
+      e.preventDefault();
+      dropEl.classList.remove("drag");
+    })
+  );
+  dropEl.addEventListener("drop", (e) => {
+    const file = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (file) loadFromFile(file);
+  });
+
+  sampleBtn.addEventListener("click", () => {
+    dropLabel.textContent = "Click to choose a file, or drag one here";
+    fileInput.value = "";
+    loadReport(SAMPLE_REPORT, "sample report");
+  });
+
+  searchEl.addEventListener("input", renderTable);
+  statusFilterEl.addEventListener("change", renderTable);
+
+  loadReport(SAMPLE_REPORT, "sample report");
+</script>
+</body>
+</html>

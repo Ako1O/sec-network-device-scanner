@@ -44,7 +44,8 @@ def _get_default_gateway_ipconfig_windows() -> str | None:
 def get_gateway_for_network(network: ipaddress.IPv4Network) -> str | None:
     """
     Return the default gateway IP that belongs to the given `network` (best effort).
-    On Windows: parse `route.exe print -4` and pick the default route whose Interface IP is in `network`.
+    On Windows: parse `route.exe print -4` and pick the default route whose
+    Interface IP is in `network`.
     """
     system = platform.system().lower()
 

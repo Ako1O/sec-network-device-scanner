@@ -34,6 +34,10 @@ htmlcov/
 devices_db.json
 *.log
 
+# Scan reports written with --out (contain real local network data)
+report.json
+my_real_scan.json
+
 # -------------------------
 # IDE / Editor
 # -------------------------
